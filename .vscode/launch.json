@@ -1,0 +1,34 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "compounds": [
+    {
+      "name": "Start All Services",
+      "configurations": ["Run ApiGateway", "Run PDFProcessingService"]
+    }
+    ],
+    "configurations": [
+        {
+            "name": "Run ApiGateway",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "${workspaceFolder}/ApiGateway/bin/Debug/net9.0/ApiGateway.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}/ApiGateway",
+            "stopAtEntry": false
+          },
+          {
+            "name": "Run PDFProcessingService",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "${workspaceFolder}/PDFProcessingService/bin/Debug/net9.0/PDFProcessingService.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}/PDFProcessingService",
+            "stopAtEntry": false
+          }
+    ]
+}
