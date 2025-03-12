@@ -2,8 +2,17 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Hosting;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Text.Json;
+using System.Threading.Tasks;
 
+/// <summary>
+/// API Gateway service for handling PDF uploads and forwarding to the processing service
+/// </summary>
 var builder = WebApplication.CreateBuilder(args);
 
 // Set size limits - updated to 100MB
@@ -30,8 +39,16 @@ var logger = app.Logger;
 // PDF processing service URL
 string pdfProcessingServiceUrl = "http://localhost:5001/process";
 
+/// <summary>
+/// Endpoint for uploading PDF files
+/// </summary>
 app.MapPost("/upload", async (HttpRequest request) =>
 {
+    // Initialize simple timing dictionary (in seconds)
+    var timings = new Dictionary<string, double>();
+    var stopwatch = new Stopwatch();
+    stopwatch.Start();
+
     try
     {
         logger.LogInformation("Received new PDF upload request");
@@ -42,8 +59,11 @@ app.MapPost("/upload", async (HttpRequest request) =>
             return Results.BadRequest("The received content is not valid.");
         }
 
+        // Read form data
+        var formReadStart = stopwatch.Elapsed;
         var form = await request.ReadFormAsync();
         var file = form.Files.FirstOrDefault();
+        timings["upload_time"] = (stopwatch.Elapsed - formReadStart).TotalSeconds;
 
         if (file == null)
         {
@@ -53,6 +73,7 @@ app.MapPost("/upload", async (HttpRequest request) =>
 
         logger.LogInformation($"Received file: {file.FileName}, size: {file.Length / 1024.0:F2} KB");
 
+        // Validate file type and size
         if (file.ContentType != "application/pdf" && !file.FileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
         {
             logger.LogWarning("File type is not PDF");
@@ -65,7 +86,8 @@ app.MapPost("/upload", async (HttpRequest request) =>
             return Results.BadRequest($"File size exceeds the allowed limit of {MAX_FILE_SIZE / 1024.0 / 1024.0:F2} MB.");
         }
 
-        // Faster transfer using direct stream instead of temporary storage
+        // Send to processing service
+        var processingStart = stopwatch.Elapsed;
         using var httpClient = new HttpClient();
         using var content = new MultipartFormDataContent();
 
@@ -80,31 +102,60 @@ app.MapPost("/upload", async (HttpRequest request) =>
             fileName: file.FileName
         );
 
-        // Add request information
-        logger.LogInformation("Sending file for processing...");
+        // Set timeout and send
         httpClient.Timeout = TimeSpan.FromSeconds(60); // One minute timeout for processing
+        logger.LogInformation("Sending file for processing...");
 
-        // Send file to PDFProcessingService
         var response = await httpClient.PostAsync(pdfProcessingServiceUrl, content);
+        timings["processing_time"] = (stopwatch.Elapsed - processingStart).TotalSeconds;
 
-        // Read response content from service
-        var responseBody = await response.Content.ReadAsStringAsync();
-        logger.LogInformation($"Response from service: {response.StatusCode}");
+        // Calculate total time
+        stopwatch.Stop();
+        timings["total_time"] = stopwatch.Elapsed.TotalSeconds;
 
         if (response.IsSuccessStatusCode)
         {
-            return Results.Ok(new
+            var responseBody = await response.Content.ReadAsStringAsync();
+            logger.LogInformation($"Response from service: {response.StatusCode}");
+
+            // Try to parse processing service response
+            Dictionary<string, object> result = new Dictionary<string, object>
             {
-                message = "File sent for processing successfully.",
-                details = responseBody
-            });
+                { "message", "File processed successfully." },
+                { "gateway_timings", new {
+                    upload_seconds = Math.Round(timings["upload_time"], 2),
+                    processing_seconds = Math.Round(timings["processing_time"], 2),
+                    total_seconds = Math.Round(timings["total_time"], 2)
+                }}
+            };
+
+            try
+            {
+                // Add the processing service response
+                var processingResponse = JsonSerializer.Deserialize<Dictionary<string, object>>(responseBody,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                if (processingResponse != null)
+                {
+                    result["processing_details"] = processingResponse;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning($"Couldn't parse processing service response: {ex.Message}");
+                result["processing_service_response"] = responseBody;
+            }
+
+            logger.LogInformation($"Request completed in {timings["total_time"]:F2} seconds");
+            return Results.Ok(result);
         }
         else
         {
+            var responseBody = await response.Content.ReadAsStringAsync();
             logger.LogWarning($"Processing service returned an error: {response.StatusCode}");
             return Results.Problem(
                 detail: responseBody,
-                title: "An error occurred while sending the file for processing",
+                title: "An error occurred while processing the file",
                 statusCode: (int)response.StatusCode,
                 instance: "/upload"
             );
@@ -112,7 +163,11 @@ app.MapPost("/upload", async (HttpRequest request) =>
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "General error in API Gateway");
+        // Record error time
+        stopwatch.Stop();
+        timings["error_time"] = stopwatch.Elapsed.TotalSeconds;
+
+        logger.LogError(ex, $"General error in API Gateway after {timings["error_time"]:F2} seconds");
         return Results.Problem(
             detail: ex.StackTrace,
             title: "General error in API Gateway",
@@ -122,5 +177,11 @@ app.MapPost("/upload", async (HttpRequest request) =>
         );
     }
 });
+
+/// <summary>
+/// Health check endpoint
+/// </summary>
+/// <returns>A simple health status</returns>
+app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
 
 app.Run("http://0.0.0.0:5000");
