@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("PDFProcessingService")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+8477e6d75bf81076bbbbf3d942f953cd367a34b7")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+97110176dac36030f323e8d424cf9e6c9ef065f4")]
 [assembly: System.Reflection.AssemblyProductAttribute("PDFProcessingService")]
 [assembly: System.Reflection.AssemblyTitleAttribute("PDFProcessingService")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
